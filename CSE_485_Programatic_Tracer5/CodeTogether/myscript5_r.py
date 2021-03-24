@@ -49,10 +49,12 @@ class Python_tracer():
 
     def setFilePath(self, filepathParam):
         self.filepath = filepathParam
-        self.lastlineofprogram = self.getlastline(self.filepath[1:])
-    
+        #self.lastlineofprogram = self.getlastline(self.filepath[1:])
+        self.lastlineofprogram = self.getlastline(self.filepath)
+
     def getlastline(self, filepath):
         programLineNumberCounter = 0
+        print("myscript5 filepath is ", filepath)
         with open(filepath, 'r') as file:
             for line in file:
                 programLineNumberCounter += 1
@@ -64,7 +66,8 @@ class Python_tracer():
         # globals.update({
         #     "__name__": "__main__",
         # })
-        currentDirectorypath = os.getcwd()+self.filepath
+        currentDirectorypath = self.filepath
+        #print("myscript5 injectTracer filepath ", currentDirectorypath)
         with open(currentDirectorypath, 'rb') as file:
             codeObject = compile(file.read(), currentDirectorypath, 'exec')
             settrace(self.mainTracer)
@@ -124,7 +127,8 @@ class Python_tracer():
 
         print('waiting at mainTracer(): ', event, ' ', frame.f_code.co_name)
         # print the current source line
-        print(str(frame.f_lineno) + '\t' + linecache.getline(self.filepath[1:], frame.f_lineno), end='')
+        #print(str(frame.f_lineno) + '\t' + linecache.getline(self.filepath[1:], frame.f_lineno), end='')
+        print(str(frame.f_lineno) + '\t' + linecache.getline(self.filepath, frame.f_lineno), end='')
         # wait for a commend
         self.WaitUntil(1)
         print('mainTracer(): ', self.command)
@@ -172,7 +176,8 @@ class Python_tracer():
         #else:
         #    print(str(frame.f_lineno) + '\t' + linecache.getline(self.filepath[1:], frame.f_lineno), end = '')
         if event == 'line':
-            print(str(frame.f_lineno) + '\t' + linecache.getline(self.filepath[1:], frame.f_lineno), end = '')
+            #print(str(frame.f_lineno) + '\t' + linecache.getline(self.filepath[1:], frame.f_lineno), end = '')
+            print(str(frame.f_lineno) + '\t' + linecache.getline(self.filepath, frame.f_lineno), end='')
             self.logic_checker.check_conditions({}, scopes=self.CactusStack.current_frame.vars)
         # wait for command
         self.WaitUntil(1)
@@ -224,7 +229,8 @@ class Python_tracer():
         self.curEvent = event
         print('innerFunctionStepover(): ', event, frame.f_code.co_name, self.command)
         if event == 'line':
-            print(str(frame.f_lineno) + '\t' + linecache.getline(self.filepath[1:], frame.f_lineno), end = '')
+            #print(str(frame.f_lineno) + '\t' + linecache.getline(self.filepath[1:], frame.f_lineno), end = '')
+            print(str(frame.f_lineno) + '\t' + linecache.getline(self.filepath, frame.f_lineno), end='')
 
         if event == 'return' and frame.f_code.co_name != '<module>':
             print("innerFunctionStepover return pop node ", frame.f_code.co_name)
