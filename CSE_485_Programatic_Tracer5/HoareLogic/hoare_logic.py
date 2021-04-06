@@ -74,13 +74,17 @@ class program_conditions:
 
     def compare_vars(self, global_scope, scopes, cond, num):
 
-        evalResult = eval(cond,global_scope,scopes)
-
-        # Confirm that evalResult is a boolean and therefore the condition is a boolean expression
-        if(evalResult==True):
-            return True
-        elif(evalResult==False):
+        try:
+            evalResult = eval(cond,global_scope,scopes)
+        except NameError: # Variable is most likely not yet defined
             return False
+
         else:
-            print("Error: The evaluation of line",num,"did not result in a boolean")
-            sys.exit()
+            # Confirm that evalResult is a boolean and therefore the condition is a boolean expression
+            if(evalResult==True):
+                return True
+            elif(evalResult==False):
+                return False
+            else:
+                print("Error: The evaluation of line",num,"did not result in a boolean")
+                sys.exit()
