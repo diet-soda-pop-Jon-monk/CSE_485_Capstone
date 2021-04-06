@@ -45,6 +45,8 @@ class Python_tracer():
         self.breakpointlist = []
         self.curFrame = None
         self.quitValue = 0
+        self.stepover_active = False
+        self.stepover_call_depth = 0
         self.logic_checker = None
 
     def setFilePath(self, filepathParam):
@@ -61,6 +63,13 @@ class Python_tracer():
         print("In getlastline. Last line of file is line # " + str(programLineNumberCounter))
         return programLineNumberCounter
     
+    # This function executes in the tracing thread started
+    # in function start().
+    #
+    # It compiles the program to trace, sets the trace callback
+    # function to the mainTracer function and executes the
+    # program.  When the exec() function returns, the executuion
+    # of the traced program is complete.
     def injectTracer(self):
         globals = {}
         # globals.update({
@@ -94,7 +103,12 @@ class Python_tracer():
         events.
 
         The first invocation is a call event to <module>
-        '''     
+        '''
+        # check for abort tracing indication
+        if self.quitValue == 1:
+            print("mainTracer(): quitValue")
+            raise SystemExit()
+
         self.curFrame = frame
         self.curEvent = event
         # if self.scope is None or self.scope.is_empty():
@@ -124,7 +138,6 @@ class Python_tracer():
             self.logic_checker.check_conditions({}, scopes=self.CactusStack.current_frame.vars)
             self.CactusStack.push(Node(frame.f_code.co_name, frame.f_locals))
 
-
         print('waiting at mainTracer(): ', event, ' ', frame.f_code.co_name)
         # print the current source line
         #print(str(frame.f_lineno) + '\t' + linecache.getline(self.filepath[1:], frame.f_lineno), end='')
@@ -136,8 +149,8 @@ class Python_tracer():
         # The normal means of quitting is when a local trace function
         # encounters a returm from <module>.
         # if commanded to quit, push frame and exit
-        if self.quitValue == 1:
-            print("mainTracer(): quitValue")
+        if self.command == "quit":
+            #print("mainTracer(): quit command")
             self.CactusStack.push(Node(frame.f_code.co_name, frame.f_locals))
             self.logic_checker.check_conditions({}, scopes=self.CactusStack.current_frame.vars)
             raise SystemExit()
@@ -167,6 +180,11 @@ class Python_tracer():
         :param arg:
         :return:    settrace() local callback function
         '''
+        # check for abort trace indication
+        if self.quitValue == 1:
+            print("innerFunction(): quitValue")
+            raise SystemExit()
+
         self.curFrame = frame
         self.curEvent = event
         print('waiting innerFunction(): ', event, frame.f_code.co_name)
@@ -179,6 +197,7 @@ class Python_tracer():
             #print(str(frame.f_lineno) + '\t' + linecache.getline(self.filepath[1:], frame.f_lineno), end = '')
             print(str(frame.f_lineno) + '\t' + linecache.getline(self.filepath, frame.f_lineno), end='')
             self.logic_checker.check_conditions({}, scopes=self.CactusStack.current_frame.vars)
+
         # wait for command
         self.WaitUntil(1)
 
@@ -205,8 +224,8 @@ class Python_tracer():
         elif event == "return" and frame.f_code.co_name == '<module>':
             self.Set(0)
             return
-        if self.quitValue == 1:
-            print("innerFunction quitValue ", frame.f_code.co_name)
+        if self.command == 'quit':
+            #print("innerFunction quit command ", frame.f_code.co_name)
             #self.CactusStack.push(Node(frame.f_code.co_name, frame.f_locals))
             self.Set(0)
             raise SystemExit()
@@ -225,6 +244,11 @@ class Python_tracer():
             :param arg:
             :return:    settrace() local callback function
         '''
+        # check for abort trace indication
+        if self.quitValue == 1:
+            print("innerFunctionStepover(): quitValue")
+            raise SystemExit()
+
         self.curFrame = frame
         self.curEvent = event
         print('innerFunctionStepover(): ', event, frame.f_code.co_name, self.command)
@@ -252,19 +276,49 @@ class Python_tracer():
     def TracerThread(self):
         self.injectTracer()
 
+
+    ##
+    #  The following functions provide the API to control the
+    #  the tracing of the program under test.
+    ##
+
+    # This function starts starts a thread running the program
+    # under test.  The tracing logic will wait for a command
+    # {step, stepover, quit}.
     def start(self):
+        # reset instance variables
         self.reset()
+        # start a thread
         t1 = threading.Thread(name='TracerThread', target=self.TracerThread)
         t1.start()
         self.threads = t1
 
-    def quitEndProgram(self):
-        self.commandHandler('quit')
+    # the quit function, performs an orderly stop of
+    # the thread running the program under test
+    def abort(self):
+        # settrace(None)
+        #self.WaitUntil(0)
+        self.quitValue = 1
+        #self.command = 'quit'
+        #self.Set(1)
+        #self.WaitUntil(0)
+        # clearing stops callbacks
+        settrace(None)
 
+        try:
+            self.threads.join()
+            print("\nlogic checker results")
+            self.logic_checker.program_end({}, scopes=self.CactusStack.current_frame.vars)
+            # self.reset()
+        except:
+            print("Error: Used quit without a corresponding start. Please use start to begin trace.")
+
+    # the quit function, performs an orderly stop of
+    # the thread running the program under test
     def quit(self):
         #settrace(None)
         self.WaitUntil(0)
-        self.quitValue = 1
+        #self.quitValue = 1
         self.command = 'quit'
         self.Set(1)
         self.WaitUntil(0)
@@ -279,6 +333,14 @@ class Python_tracer():
         except:
             print("Error: Used quit without a corresponding start. Please use start to begin trace.")
 
+    #
+    # The following three functions coordinate the interaction
+    # of the thread running the traced program and the thread
+    # controlling the tracing.  A value of 1 indicates that the
+    # controlling thread has provided a new command.  A value
+    # of 0 indicates that the tracing thread has completed
+    # processing the previous command.
+    #
     def Set(self, v):
         self.var_mutex.acquire()
         self.var = v
@@ -295,22 +357,31 @@ class Python_tracer():
             self.var_mutex.release()
             self.var_event.wait(1) # Wait 1 sec
 
+    # Pass a command from the controlling thread to
+    # the tracing thread.  Wait until the tracing thread
+    # has completed the previous cammand, update the command
+    # variable and indicate that a new command is available.
     def commandHandler(self, command):
 #        if self.curFrame is not None and (int(self.lastlineofprogram) <= int(self.curFrame.f_lineno)):
 #            print("reached last line of file")
 #            self.quit()
 #        elif command == 'quit':
-        if command == 'quit':
+        if command == 'abort':
+            self.abort()
+        elif command == 'quit':
             self.quit()
         else:
             self.WaitUntil(0)
             self.command = command
             self.Set(1)
 
+    # step: trace one line
     def step(self):
         newCommand = "step"
         self.commandHandler(newCommand)
 
+    # stepover: silently trace one line which is usually
+    # a function call.
     def stepover(self):
         if self.curEvent == 'call' or self.curEvent == 'line':
             newCommand = "stepover"
@@ -318,6 +389,7 @@ class Python_tracer():
         else:
             print('can not stepover because not over function')
 
+    # trace until a breakpoint is encountered or the end of program
     def continueRun(self):
         if self.curFrame == None:
             self.step()
@@ -328,7 +400,6 @@ class Python_tracer():
         while self.curFrame.f_lineno not in self.breakpointlist and self.curFrame.f_lineno != self.lastlineofprogram:
             # print(self.curFrame.f_lineno)
             self.commandHandler('step')
-        #self.step()
 
     def addbreakpoint(self, breakpointNew):
         for breakpointElement in breakpointNew:
